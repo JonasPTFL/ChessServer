@@ -16,9 +16,9 @@ const io = socketIo(server);
 
 const secretKey = 'SECRET_JP_CHESS';
 
-const disconnectedPlayers = {};
-const players = {};
-const games = {};
+const disconnectedPlayers = new Map();
+const players = new Map();
+const games = new Map();
 
 
 io.use((socket, next) => {
@@ -29,12 +29,17 @@ io.use((socket, next) => {
         console.log("authenticated failed");
         next(new Error("failed to authenticate"));
       } else {
-        const player = disconnectedPlayers[decoded.username];
-        player.setSocketId(socket.id);
-        players[decoded.username] = player;
-        delete disconnectedPlayers[decoded.username];
-        console.log("authenticated: "+player.username + ", "+ player.socketId + ", "+ player.token);
-        next();
+        const player = disconnectedPlayers.get(decoded.username);
+        if (player == undefined) {
+          console.log("user '"+decoded.username+"' is not logged in, please log in first");
+          next(new Error("failed to authenticate"));
+        } else {
+          player.setSocketId(socket.id);
+          players.set(decoded.username, player);
+          disconnectedPlayers.delete(decoded.username);
+          console.log("authenticated: "+player.username + ", "+ player.socketId + ", "+ player.token);
+          next();
+        }
       }
     });
   } else {
@@ -57,28 +62,39 @@ io.on('connection', function(socket) {
 app.post('/create-game', authMiddleware, (req, res) => {
   const player = getPlayerFromRequest(req);
   const game = new Game(player);
-  games[game.id] = { key: game };
+  games.set(game.id, game);
 
   console.log("game created: "+game.id);
   // Respond with the created game ID
-  res.status(201).json({ game });
+  res.status(201).json(game);
+});
+
+
+// POST endpoint to create a game
+app.get('/games', authMiddleware, (req, res) => {
+  const valuesArray = Array.from(games.values());
+
+  console.log(games);
+  console.log(valuesArray);
+  res.json(valuesArray);
 });
 
 // POST endpoint to create a game
 app.post('/join-game', authMiddleware, (req, res) => {
-  const game = games[req.body.gameID];
+  const game = games.get(req.body.gameID);
   const player = getPlayerFromRequest(req);
   game.addPlayer(player);
+  games.set(req.body.gameID, game);
   
   console.log("game joined: "+game.id);
   // Respond with the created game ID
-  res.status(200).json({ game });
+  res.status(200).json(game);
 });
 
 // POST endpoint to create a game
 app.post('/login', (req, res) => {
   const token = authenticate(req.body.username, req.body.password)
-  disconnectedPlayers[req.body.username] = new Player(req.body.username, token);
+  disconnectedPlayers.set(req.body.username, new Player(req.body.username, token));
   res.status(200).json({ token });
 });
 
@@ -101,7 +117,7 @@ function authenticate(username, password){
 }
 
 function getPlayerFromRequest(req){
-  return players[req.user.username];
+  return players.get(req.user.username);
 }
 
 function getToken(req){
