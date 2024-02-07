@@ -20,6 +20,12 @@ const disconnectedPlayers = new Map();
 const players = new Map();
 const games = new Map();
 
+const event_game_state = "game_state";
+const event_move = "move";
+const event_opponent_move = "opponent_move";
+const game_state_white_turn = "white_turn";
+const game_state_black_turn = "black_turn";
+
 
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
@@ -50,17 +56,40 @@ io.use((socket, next) => {
 
 // Event listener for when a client connects
 io.on('connection', function(socket) {
-  console.log('A client connected');
+  console.log('a client connected');
+
+  socket.on(event_move, (data) => {
+    const player = getPlayerFromSocketId(socket.id);
+    console.log('game action received: '+data);
+    
+    const game = Array.from(games.values()).find(game => game.containsPlayer(player.username));
+    if(game == undefined) {
+      console.log("game for move "+data+" by player "+player.username+" not found");
+    } else {
+      if(game.isWhitePlayer(player.username) && game.isWhiteTurn()){
+        sendToUsername(game.blackPlayer, event_opponent_move, data);
+        sendToGamePlayers(game, event_game_state, game_state_black_turn);
+      } else if (game.isBlackPlayer(player.username) && !game.isWhiteTurn()) {
+        sendToUsername(game.whitePlayer, event_opponent_move, data);
+        sendToGamePlayers(game, event_game_state, game_state_white_turn);
+      }
+      game.changeTurn();
+    }
+  });
 
   // Event listener for when a client disconnects
   socket.on('disconnect', function() {
-    console.log('A client disconnected');
+    console.log('a client disconnected');
+    const player = getPlayerFromSocketId(socket.id);
+    leavePreviousGames(player)
   });
 });
 
 // POST endpoint to create a game
 app.post('/create-game', authMiddleware, (req, res) => {
   const player = getPlayerFromRequest(req);
+  leavePreviousGames(player);
+
   const game = new Game(player);
   games.set(game.id, game);
 
@@ -73,29 +102,44 @@ app.post('/create-game', authMiddleware, (req, res) => {
 // POST endpoint to create a game
 app.get('/games', authMiddleware, (req, res) => {
   const valuesArray = Array.from(games.values());
-
-  console.log(games);
-  console.log(valuesArray);
   res.json(valuesArray);
 });
 
 // POST endpoint to create a game
 app.post('/join-game', authMiddleware, (req, res) => {
-  const game = games.get(req.body.gameID);
   const player = getPlayerFromRequest(req);
-  game.addPlayer(player);
-  games.set(req.body.gameID, game);
-  
-  console.log("game joined: "+game.id);
-  // Respond with the created game ID
-  res.status(200).json(game);
+  leavePreviousGames(player);
+  const game = games.get(req.body.gameId);
+  if(game == undefined || game == null) {
+    res.status(400).json("Game not found");
+  } else {
+    game.addPlayer(player);
+    games.set(req.body.gameID, game);
+
+    console.log("game joined: "+game.id);
+    if(game.isFull()){
+      game.start();
+      console.log("Game started: "+game.id);
+      
+      sendToGamePlayers(game, event_game_state, game_state_white_turn);
+      
+    }
+    // Respond with the created game ID
+    res.status(200).json(game);
+  }
 });
 
 // POST endpoint to create a game
 app.post('/login', (req, res) => {
-  const token = authenticate(req.body.username, req.body.password)
-  disconnectedPlayers.set(req.body.username, new Player(req.body.username, token));
-  res.status(200).json({ token });
+  const username = req.body.username;
+  // check if username already exsists
+  if(Array.from(players.values()).some(player => player.username == username)){
+    res.status(400).json("Username already exsists")
+  } else {
+    const token = authenticate(username, req.body.password)
+    disconnectedPlayers.set(username, new Player(username, token));
+    res.status(200).json({ token });
+  }
 });
 
 const port = process.env.PORT || 3000;
@@ -103,7 +147,7 @@ server.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
 
-function authenticate(username, password){
+function authenticate(username, password) {
   const payload = {
       username: username,
       password: password
@@ -116,8 +160,35 @@ function authenticate(username, password){
   return jwt.sign(payload, secretKey, options);
 }
 
+// removes given player from current games and deletes games, that are empty after the player left
+function leavePreviousGames(player) {
+  const currentGames = Array.from(games.values()).filter(game => game.containsPlayer(player.username));
+  
+  currentGames.forEach(game => {
+    game.removePlayer(player);
+    if(game.isEmpty()){
+      games.delete(game.id);
+    } else {
+      games.set(game.id, game);
+    }
+  });
+}
+
+function sendToGamePlayers(game, event, data){
+  io.to(players.get(game.whitePlayer).socketId).emit(event, data);
+  io.to(players.get(game.blackPlayer).socketId).emit(event, data);
+}
+
+function sendToUsername(username, event, data){
+  io.to(players.get(username).socketId).emit(event, data);
+}
+
 function getPlayerFromRequest(req){
   return players.get(req.user.username);
+}
+
+function getPlayerFromSocketId(socketId){
+  return Array.from(players.values()).find(player => player.socketId == socketId);
 }
 
 function getToken(req){

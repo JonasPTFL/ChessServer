@@ -2,6 +2,8 @@ class Game {
     static GAME_ID_LENGTH = 10;
 
     constructor(hostPlayer) {
+        this.running = false;
+        this.whiteTurn = true;
         this.id = this.generateGameId(8);
         if (this.getRandomBoolean()) {
             this.whitePlayer = hostPlayer.username;
@@ -20,7 +22,52 @@ class Game {
         }
     }
 
-    isGameFull(){
+    removePlayer(player){
+        if(this.whitePlayer == player.username) {
+            this.whitePlayer = null;
+        } else if (this.blackPlayer == player.username){
+            this.blackPlayer = null;
+        }
+    }
+
+    isWhitePlayer(userName){
+        return this.whitePlayer == userName;
+    }
+
+    isBlackPlayer(userName){
+        return this.blackPlayer == userName;
+    }
+
+    containsPlayer(userName){
+        return this.isWhitePlayer(userName) || this.isBlackPlayer(userName);
+    }
+
+    start(){
+        this.isRunning = true;
+    }
+    
+
+    isWhiteTurn(){
+        return this.whiteTurn;
+    }
+
+    changeTurn(){
+        if(this.isWhiteTurn()){
+            this.whiteTurn = false;
+        } else {
+            this.whiteTurn = true;
+        }
+    }
+
+    isRunning(){
+        return this.running;
+    }
+
+    isEmpty(){
+        return this.whitePlayer == null && this.blackPlayer == null;
+    }
+
+    isFull(){
         return this.whitePlayer != null && this.blackPlayer != null;
     }
 
