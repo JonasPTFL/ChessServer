@@ -25,6 +25,7 @@ const event_move = "move";
 const event_opponent_move = "opponent_move";
 const game_state_white_turn = "white_turn";
 const game_state_black_turn = "black_turn";
+const game_state_start = "start";
 
 
 io.use((socket, next) => {
@@ -121,6 +122,7 @@ app.post('/join-game', authMiddleware, (req, res) => {
       game.start();
       console.log("Game started: "+game.id);
       
+      sendToGamePlayers(game, event_game_state, game_state_start);
       sendToGamePlayers(game, event_game_state, game_state_white_turn);
       
     }
